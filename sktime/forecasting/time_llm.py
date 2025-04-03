@@ -164,8 +164,8 @@ class TimeLLMForecaster(BaseForecaster):
         ).load_model()
 
         self.model_ = self.model_.to(self.device_)
-        self.model_ = self.model_.to(torch.bfloat16)
-
+        # self.model_ = self.model_.to(torch.bfloat16)
+        self.model_ = self.model_.float()
         self.last_values = y
 
     def _get_unique_time_llm_key(self):
