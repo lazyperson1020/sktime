@@ -3,6 +3,7 @@
 from math import sqrt
 
 from sktime.utils.dependencies import _safe_import
+from transformers import AutoConfig, AutoModel, AutoTokenizer
 
 torch = _safe_import("torch")
 nn = _safe_import("torch.nn")
@@ -55,122 +56,56 @@ class Model(nn.Module):
         self.d_llm = configs.llm_dim
         self.patch_len = configs.patch_len
         self.stride = configs.stride
+        
+        config_kwargs = {
+            "num_hidden_layers": configs.llm_layers,
+            "output_attentions": True,
+            "output_hidden_states": True,
+        }
 
-        if configs.llm_model == "LLAMA":
-            # self.llama_config = LlamaConfig.from_pretrained
-            # ('/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/')
-            self.llama_config = LlamaConfig.from_pretrained("huggyllama/llama-7b")
-            self.llama_config.num_hidden_layers = configs.llm_layers
-            self.llama_config.output_attentions = True
-            self.llama_config.output_hidden_states = True
-            try:
-                self.llm_model = LlamaModel.from_pretrained(
-                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/",
-                    "huggyllama/llama-7b",
-                    trust_remote_code=True,
-                    local_files_only=True,
-                    config=self.llama_config,
-                    # load_in_4bit=True
-                )
-            except OSError:  # downloads model from HF is not already done
-                print("Local model files not found. Attempting to download...")
-                self.llm_model = LlamaModel.from_pretrained(
-                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/",
-                    "huggyllama/llama-7b",
-                    trust_remote_code=True,
-                    local_files_only=False,
-                    config=self.llama_config,
-                    # load_in_4bit=True
-                )
-            try:
-                self.tokenizer = LlamaTokenizer.from_pretrained(
-                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/tokenizer.model",
-                    "huggyllama/llama-7b",
-                    trust_remote_code=True,
-                    local_files_only=True,
-                )
-            except OSError:  # downloads the tokenizer from HF if not already done
-                print("Local tokenizer files not found. Atempting to download them..")
-                self.tokenizer = LlamaTokenizer.from_pretrained(
-                    # "/mnt/alps/modelhub/pretrained_model/LLaMA/7B_hf/tokenizer.model",
-                    "huggyllama/llama-7b",
-                    trust_remote_code=True,
-                    local_files_only=False,
-                )
-        elif configs.llm_model == "GPT2":
-            self.gpt2_config = GPT2Config.from_pretrained("openai-community/gpt2")
+        model_mapping = {
+            "LLAMA": "huggyllama/llama-7b",
+            "GPT2": "openai-community/gpt2",
+            "BERT": "google-bert/bert-base-uncased",
+        }
+        
+        if configs.llm_model not in model_mapping:
+            raise ValueError(f"Unsupported LLM model: {configs.llm_model}")
+        
+        model_path = model_mapping[configs.llm_model]
 
-            self.gpt2_config.num_hidden_layers = configs.llm_layers
-            self.gpt2_config.output_attentions = True
-            self.gpt2_config.output_hidden_states = True
-            try:
-                self.llm_model = GPT2Model.from_pretrained(
-                    "openai-community/gpt2",
-                    trust_remote_code=True,
-                    local_files_only=False,
-                    config=self.gpt2_config,
-                )
-            except OSError:  # downloads model from HF is not already done
-                print("Local model files not found. Attempting to download...")
-                self.llm_model = GPT2Model.from_pretrained(
-                    "openai-community/gpt2",
-                    trust_remote_code=True,
-                    local_files_only=False,
-                    config=self.gpt2_config,
-                )
+        self.model_config = AutoConfig.from_pretrained(model_path)
 
-            try:
-                self.tokenizer = GPT2Tokenizer.from_pretrained(
-                    "openai-community/gpt2",
-                    trust_remote_code=True,
-                    local_files_only=False,
-                )
-            except OSError:  # downloads the tokenizer from HF if not already done
-                print("Local tokenizer files not found. Atempting to download them..")
-                self.tokenizer = GPT2Tokenizer.from_pretrained(
-                    "openai-community/gpt2",
-                    trust_remote_code=True,
-                    local_files_only=False,
-                )
-        elif configs.llm_model == "BERT":
-            self.bert_config = BertConfig.from_pretrained(
-                "google-bert/bert-base-uncased"
+        for key, value in config_kwargs.items():
+            setattr(self.model_config, key, value)
+
+        try:
+            self.llm_model = AutoModel.from_pretrained(
+                model_path,
+                trust_remote_code=True,
+                local_files_only=True,
+                config=self.model_config
+            )
+        except OSError:
+            self.llm_model = AutoModel.from_pretrained(
+                model_path,
+                trust_remote_code=True,
+                local_files_only=False,
+                config=self.model_config
             )
 
-            self.bert_config.num_hidden_layers = configs.llm_layers
-            self.bert_config.output_attentions = True
-            self.bert_config.output_hidden_states = True
-            try:
-                self.llm_model = BertModel.from_pretrained(
-                    "google-bert/bert-base-uncased",
-                    trust_remote_code=True,
-                    local_files_only=True,
-                    config=self.bert_config,
-                )
-            except OSError:  # downloads model from HF is not already done
-                print("Local model files not found. Attempting to download...")
-                self.llm_model = BertModel.from_pretrained(
-                    "google-bert/bert-base-uncased",
-                    trust_remote_code=True,
-                    local_files_only=False,
-                    config=self.bert_config,
-                )
-
-            try:
-                self.tokenizer = BertTokenizer.from_pretrained(
-                    "google-bert/bert-base-uncased",
-                    trust_remote_code=True,
-                    local_files_only=True,
-                )
-            except OSError:  # downloads the tokenizer from HF if not already done
-                print("Local tokenizer files not found. Atempting to download them..")
-                self.tokenizer = BertTokenizer.from_pretrained(
-                    "google-bert/bert-base-uncased",
-                    trust_remote_code=True,
-                    local_files_only=False,
-                )
-        else:
-            raise Exception("LLM model is not defined")
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_path,
+                trust_remote_code=True,
+                local_files_only=True
+            )
+        except OSError:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                model_path,
+                trust_remote_code=True,
+                local_files_only=False
+            )
 
         if self.tokenizer.eos_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -278,7 +213,7 @@ class Model(nn.Module):
         ).permute(1, 0)
 
         x_enc = x_enc.permute(0, 2, 1).contiguous()
-        enc_out, n_vars = self.patch_embedding(x_enc.to(torch.bfloat16))
+        enc_out, n_vars = self.patch_embedding(x_enc.to(torch.float32))
         enc_out = self.reprogramming_layer(
             enc_out, source_embeddings, source_embeddings
         )
